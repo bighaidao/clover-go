@@ -45,7 +45,9 @@ CGO_ENABLED=0 GOOS=darwin GOARCH="${GO_ARCH}" go build -ldflags="-s -w" -o "${BU
 
 # 2. 预编译 Swift 原生能力 helper（PDF/水印/Finder sfl3）
 echo "[2] 预编译 clover-helper (swiftc -target ${SWIFT_TARGET})..."
-swiftc -target "${SWIFT_TARGET}" -O -o "${BUILD_DIR}/clover-helper-${ARCH_LABEL}" "${ROOT_DIR}/tools/clover-helper/main.swift"
+swiftc -target "${SWIFT_TARGET}" -O \
+    -o "${BUILD_DIR}/clover-helper-${ARCH_LABEL}" \
+    "${ROOT_DIR}/tools/clover-helper/main.swift"
 
 # 3. 组装 macOS .app 包结构
 echo "[3] 组装 .app 包结构..."
@@ -57,6 +59,50 @@ cp "${BUILD_DIR}/CloverGo-${ARCH_LABEL}" "${APP_DIR}/Contents/MacOS/CloverGo"
 chmod +x "${APP_DIR}/Contents/MacOS/CloverGo"
 cp "${BUILD_DIR}/clover-helper-${ARCH_LABEL}" "${APP_DIR}/Contents/MacOS/clover-helper"
 chmod +x "${APP_DIR}/Contents/MacOS/clover-helper"
+
+# 3.1 组装独立的 Finder 拦截守护进程 Bundle（参考 NewFinder 的 WatchAgent 架构）
+echo "[3.1] 组装 CloverGoWatch.app (独立 bundle id 的后台拦截代理)..."
+WATCH_APP="${APP_DIR}/Contents/Helpers/CloverGoWatch.app"
+mkdir -p "${WATCH_APP}/Contents/MacOS"
+cp "${BUILD_DIR}/clover-helper-${ARCH_LABEL}" "${WATCH_APP}/Contents/MacOS/CloverGoWatch"
+chmod +x "${WATCH_APP}/Contents/MacOS/CloverGoWatch"
+
+cat <<WEOF > "${WATCH_APP}/Contents/Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+    <key>CFBundleExecutable</key>
+    <string>CloverGoWatch</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.clover.app.watch</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>CloverGoWatch</string>
+    <key>CFBundleDisplayName</key>
+    <string>CloverGoWatch</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>CloverGo 后台监视需要在系统 Finder 被点开时关闭其窗口并拉起 CloverGo。</string>
+</dict>
+</plist>
+WEOF
 
 # 复制应用图标（优先使用 assets/AppIcon.icns 官方高清拟物图标）
 if [ -f "${ROOT_DIR}/assets/AppIcon.icns" ]; then
@@ -91,6 +137,8 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
     <string>12.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -99,6 +147,45 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>fclover</string>
+            </array>
+        </dict>
+    </array>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>CloverGo 需要控制 Finder 来接管打开文件夹请求并自动定位文件。</string>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Folder</string>
+            <key>CFBundleTypeOSTypes</key>
+            <array>
+                <string>fold</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.folder</string>
+                <string>public.directory</string>
+                <string>public.volume</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>All Items (Reveal in CloverGo)</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.item</string>
+                <string>public.data</string>
+                <string>public.content</string>
             </array>
         </dict>
     </array>

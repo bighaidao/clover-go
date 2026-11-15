@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +151,7 @@ type Coordinator struct {
 	secondaryWatchedPath string
 	runOnMain            MainRunner
 	invalidate           func()
+	focusWindow          func()
 }
 
 // NewCoordinator initializes the application coordinator.
@@ -244,6 +247,155 @@ func NewCoordinator(initialPath string, prefs *config.PrefsManager, ws *config.W
 // SetInvalidate registers the UI redraw trigger callback.
 func (c *Coordinator) SetInvalidate(fn func()) {
 	c.invalidate = fn
+}
+
+// SetFocusWindow registers a callback to bring the main window to the foreground.
+func (c *Coordinator) SetFocusWindow(fn func()) {
+	c.focusWindow = fn
+}
+
+// FocusWindow brings the window to front on the main thread.
+func (c *Coordinator) FocusWindow() {
+	if c.focusWindow != nil {
+		c.runOnMain(c.focusWindow)
+	}
+}
+
+// RevealPath opens a directory or reveals and selects a specific file in CloverGo.
+// When forceReveal is true, even a directory or .app bundle is selected inside its parent folder
+// (matching "Show in Finder" / open -R semantics). When forceReveal is false, a plain directory
+// is opened directly as a tab, while a regular file or .app bundle is revealed in its parent directory.
+func (c *Coordinator) RevealPath(rawPath string, forceReveal bool) {
+	norm := domain.NormalizePath(rawPath)
+	if norm == "" {
+		return
+	}
+
+	fi, err := os.Stat(norm)
+	isAppBundle := strings.HasSuffix(strings.ToLower(norm), ".app")
+
+	// Determine whether to open norm as a directory or select norm inside its parent directory.
+	openAsDir := false
+	if err == nil && fi.IsDir() && !isAppBundle && !forceReveal {
+		openAsDir = true
+	}
+
+	if openAsDir {
+		// Switch to existing tab if already open, otherwise create a new tab
+		switched := false
+		for i, t := range c.Tabs.Tabs {
+			if t.ActivePane().Path == norm {
+				c.Tabs.ActiveIndex = i
+				switched = true
+				break
+			}
+		}
+		if !switched {
+			c.Tabs.NewTab(norm)
+		}
+		c.FocusWindow()
+		c.LoadCurrentTab(func() {
+			c.Invalidate()
+		})
+		return
+	}
+
+	parentDir := filepath.Dir(norm)
+	targetFile := norm
+
+	// If target is hidden (starts with '.') and ShowHidden is off, temporarily enable or ensure it can be seen
+	if domain.IsHiddenName(filepath.Base(targetFile)) && c.Prefs != nil && !c.Prefs.Get().ShowHidden {
+		p := c.Prefs.Get()
+		p.ShowHidden = true
+		_ = c.Prefs.Save(p)
+	}
+
+	// Reuse existing tab if it is already at parentDir, otherwise open a new tab
+	var targetTab *TabState
+	for i, t := range c.Tabs.Tabs {
+		if t.ActivePane().Path == parentDir {
+			c.Tabs.ActiveIndex = i
+			targetTab = t
+			break
+		}
+	}
+	if targetTab == nil {
+		targetTab = c.Tabs.NewTab(parentDir)
+	}
+
+	pane := targetTab.ActivePane()
+	// Clear any active filter that might hide the revealed file
+	pane.FilterQuery = ""
+	pane.IsSearchMode = false
+	c.FilterTag = 0
+
+	c.FocusWindow()
+
+	selectTarget := func() {
+		idx := -1
+		for i, entry := range pane.DisplayEntries {
+			if entry.Path == targetFile || strings.EqualFold(entry.Path, targetFile) {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return
+		}
+		actualPath := pane.DisplayEntries[idx].Path
+		pane.Chosen.Clear()
+		pane.Chosen.Add(actualPath)
+		pane.SelectedIdx = idx
+		pane.TableState.ScrollTo(idx, ui.Center)
+		pane.GridState.ScrollTo(idx, ui.Center)
+		c.LoadPreview(pane.DisplayEntries[idx], nil)
+		c.Invalidate()
+	}
+
+	c.LoadCurrentTab(selectTarget)
+}
+
+// SetFinderTakeover toggles Finder takeover and shows a toast notification.
+func (c *Coordinator) SetFinderTakeover(enable bool) {
+	go func() {
+		err := macos.SetFinderTakeover(enable)
+		if enable {
+			macos.StartFinderWatch()
+			_ = macos.InstallWatchLaunchAgent()
+		} else {
+			macos.StopFinderWatch()
+			macos.UninstallWatchLaunchAgent()
+		}
+		c.runOnMain(func() {
+			if err != nil {
+				c.Toast("设置 Finder 接管失败: " + err.Error())
+				return
+			}
+			if enable {
+				c.Toast("已开启 Finder 接管（部分已运行的三方应用重启后生效）")
+			} else {
+				c.Toast("已关闭接管，恢复系统默认 Finder")
+			}
+		})
+	}()
+}
+
+// SetLaunchAtLogin registers or removes CloverGo as a login item.
+func (c *Coordinator) SetLaunchAtLogin(enable bool) {
+	go func() {
+		err := macos.SetLaunchAtLogin(enable)
+		c.runOnMain(func() {
+			if err != nil {
+				c.Toast("设置开机自启失败: " + err.Error())
+				return
+			}
+			if enable {
+				c.Toast("已开启开机自启")
+			} else {
+				c.Toast("已关闭开机自启")
+			}
+		})
+	}()
 }
 
 // Invalidate safely dispatches a window redraw request onto the main thread.

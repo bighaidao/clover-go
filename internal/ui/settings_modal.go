@@ -185,6 +185,14 @@ func renderGeneralTab(c *ui.Context, coord *app.Coordinator, prefs config.Prefer
 	renderCheckRow(c, "显示书签栏", prefs.ShowBookmark, func(v bool) {
 		apply(func(p *config.Preferences) { p.ShowBookmark = v })
 	})
+	renderCheckRow(c, "接管 Finder(需授予自动化权限)", prefs.TakeoverFinder, func(v bool) {
+		apply(func(p *config.Preferences) { p.TakeoverFinder = v })
+		coord.SetFinderTakeover(v)
+	})
+	renderCheckRow(c, "开机时自动启动 CloverGo", prefs.LaunchAtLogin, func(v bool) {
+		apply(func(p *config.Preferences) { p.LaunchAtLogin = v })
+		coord.SetLaunchAtLogin(v)
+	})
 
 	// 默认排序：持久化到偏好，并立即重排当前与未来所有标签页与窗格。
 	renderSegmentedRow(c, "默认排序",

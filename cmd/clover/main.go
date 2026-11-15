@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/bighaidao/clover-go/internal/app"
 	"github.com/bighaidao/clover-go/internal/config"
@@ -35,6 +38,8 @@ func main() {
 	// 1. Acquire single instance lock
 	lock, err := config.AcquireInstanceLock(paths.LockFile)
 	if err != nil {
+		// 如果已有实例在运行且当前命令行带有路径参数，通过 fclover:// 协议转发给主实例后退出
+		forwardCLIArgsToRunningInstance()
 		log.Printf("提示: %v，已退出当前进程", err)
 		return
 	}
@@ -46,10 +51,25 @@ func main() {
 	// 3. Initialize managers & coordinator
 	prefsMgr, _ := config.NewPrefsManager(paths.PrefsFile)
 	wsMgr, _ := config.NewWorkspaceManager(paths.SpacesFile)
+
+	// 启动时同步一次 Finder 接管状态（若用户开启了接管，确保 LaunchServices 与 NSFileViewer 已注册）
+	go func() {
+		if prefsMgr.Get().TakeoverFinder {
+			_ = macos.SetFinderTakeover(true)
+			macos.StartFinderWatch()
+			_ = macos.InstallWatchLaunchAgent()
+		} else {
+			macos.StopFinderWatch()
+			macos.UninstallWatchLaunchAgent()
+		}
+		// 开机自启：应用可能被移动过路径，每次启动都按偏好重新登记一次
+		_ = macos.SyncLaunchAtLogin(prefsMgr.Get().LaunchAtLogin)
+	}()
+
 	iconPipeline := icon.NewPipeline(paths.ThumbsDir)
 	defer iconPipeline.Close()
 
-	initialDir := getInitialDirectory()
+	initialDir, initialReveal := getInitialTarget()
 	coord := app.NewCoordinator(initialDir, prefsMgr, wsMgr, iconPipeline, ui.RunOnMain)
 	coord.WriteSysClipboard = mygo.Clipboard.WriteFiles
 	coord.ReadSysClipboard = mygo.Clipboard.ReadFiles
@@ -67,7 +87,7 @@ func main() {
 		spawnDetachedWindow(tab, pos, prefsMgr, wsMgr, iconPipeline)
 	})
 
-	launchWindow(coord, appState, registry)
+	launchWindow(coord, appState, registry, initialReveal)
 
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -82,6 +102,22 @@ func handleCLIFlags() bool {
 	return false
 }
 
+func forwardCLIArgsToRunningInstance() {
+	for _, arg := range os.Args[1:] {
+		if arg == "" || isFlag(arg) {
+			continue
+		}
+		if strings.HasPrefix(arg, "fclover://") {
+			_ = exec.Command("/usr/bin/open", arg).Run()
+			continue
+		}
+		if abs, err := filepath.Abs(arg); err == nil {
+			u := "fclover://reveal?path=" + url.QueryEscape(abs)
+			_ = exec.Command("/usr/bin/open", u).Run()
+		}
+	}
+}
+
 func setupAppMetadata(paths *config.SandboxPaths) {
 	mygo.App.SetName("CloverGo")
 	mygo.App.SetPath(mygo.PathUserData, paths.RootDir)
@@ -92,45 +128,61 @@ func setupAppMetadata(paths *config.SandboxPaths) {
 
 func setupDeepLinks(coord *app.Coordinator) {
 	mygo.App.OnOpenURL(func(rawURL string) {
-		_, target, err := macos.ParseCloverURL(rawURL)
-		if err == nil && target != "" {
-			ui.RunOnMain(func() {
-				coord.Tabs.NewTab(target)
-				coord.LoadCurrentTab(nil)
-			})
+		action, target, err := macos.ParseCloverURL(rawURL)
+		if err != nil || target == "" {
+			return
 		}
+		ui.RunOnMain(func() {
+			coord.RevealPath(target, action == "reveal")
+		})
 	})
 	mygo.App.OnOpenFile(func(filePath string) {
+		if filePath == "" {
+			return
+		}
 		ui.RunOnMain(func() {
-			coord.Tabs.NewTab(filePath)
-			coord.LoadCurrentTab(nil)
+			coord.RevealPath(filePath, false)
 		})
 	})
 }
 
-// setupAppMenu is defined in menu.go
-
-func getInitialDirectory() string {
-	if len(os.Args) > 1 && os.Args[1] != "" && !isFlag(os.Args[1]) {
-		if fi, err := os.Stat(os.Args[1]); err == nil && fi.IsDir() {
-			return os.Args[1]
+// getInitialTarget parses CLI arguments for initial startup directory and optional file to reveal.
+func getInitialTarget() (initialDir string, revealFile string) {
+	for _, arg := range os.Args[1:] {
+		if arg == "" || isFlag(arg) || strings.HasPrefix(arg, "fclover://") {
+			continue
+		}
+		if fi, err := os.Stat(arg); err == nil {
+			isApp := strings.HasSuffix(strings.ToLower(arg), ".app")
+			if fi.IsDir() && !isApp {
+				return arg, ""
+			}
+			return filepath.Dir(arg), arg
 		}
 	}
 	home, _ := os.UserHomeDir()
-	return home
+	return home, ""
 }
 
 func isFlag(arg string) bool {
 	return len(arg) > 0 && arg[0] == '-'
 }
 
-func launchWindow(coord *app.Coordinator, appState *ui.AppState, reg *app.WindowRegistry) {
+func launchWindow(coord *app.Coordinator, appState *ui.AppState, reg *app.WindowRegistry, initialReveal string) {
 	vibrancy := mygo.VibrancyNone
 	if runtime.GOOS == "darwin" && coord.Prefs.Get().Vibrancy {
 		vibrancy = mygo.VibrancySidebar
 	}
 
 	mygo.App.WhenReady(func() {
+		macos.RegisterLegacyOpenFilesHook(func(filePath string) {
+			if filePath == "" {
+				return
+			}
+			ui.RunOnMain(func() {
+				coord.RevealPath(filePath, false)
+			})
+		})
 		ui.ApplyAppearance(coord.Prefs.Get().Appearance)
 
 		win := mygo.NewWindow(mygo.WindowOptions{
@@ -150,6 +202,10 @@ func launchWindow(coord *app.Coordinator, appState *ui.AppState, reg *app.Window
 		coord.SetInvalidate(func() {
 			win.Invalidate()
 		})
+		coord.SetFocusWindow(func() {
+			win.Show()
+			win.Focus()
+		})
 		coord.OnDetach = func(tabIdx int) {
 			reg.DetachTab("main", tabIdx, nil)
 		}
@@ -162,9 +218,13 @@ func launchWindow(coord *app.Coordinator, appState *ui.AppState, reg *app.Window
 		win.Show()
 		win.Focus()
 
-		coord.LoadCurrentTab(func() {
-			win.Invalidate()
-		})
+		if initialReveal != "" {
+			coord.RevealPath(initialReveal, true)
+		} else {
+			coord.LoadCurrentTab(func() {
+				win.Invalidate()
+			})
+		}
 	})
 }
 
@@ -190,6 +250,10 @@ func spawnDetachedWindow(tab *app.TabState, pos *mygo.Point, prefs *config.Prefs
 	newWin := mygo.NewWindow(opt)
 	newCoord.SetInvalidate(func() {
 		newWin.Invalidate()
+	})
+	newCoord.SetFocusWindow(func() {
+		newWin.Show()
+		newWin.Focus()
 	})
 	// Detached windows own their coordinator: tear down its watcher on close.
 	newWin.OnClosed(func() {

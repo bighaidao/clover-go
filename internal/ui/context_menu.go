@@ -9,7 +9,6 @@ import (
 	"github.com/bighaidao/clover-go/internal/domain"
 	"github.com/bighaidao/clover-go/internal/fs"
 	"github.com/bighaidao/clover-go/internal/macos"
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,7 +68,7 @@ func showArchiveItemContextMenu(m *ui.Menu, coord *app.Coordinator, pane *app.Pa
 	m.Separator()
 	if m.Item("在访达中显示压缩包").Chosen() {
 		archivePath, _, _ := fs.ParseArchiveVirtualPath(pane.Path)
-		mygo.Shell.ShowItemInFolder(archivePath)
+		revealInFinderOrSelf(coord, archivePath)
 	}
 }
 
@@ -176,7 +175,7 @@ func contextSystemActions(m *ui.Menu, coord *app.Coordinator, item domain.FileIn
 	}
 
 	if m.Item("在访达中显示").Chosen() {
-		mygo.Shell.ShowItemInFolder(item.Path)
+		revealInFinderOrSelf(coord, item.Path)
 	}
 
 	if m.Item("复制绝对路径").Trailing("⌥⌘C").Chosen() {

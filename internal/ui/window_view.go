@@ -8,7 +8,6 @@ import (
 	"github.com/bighaidao/clover-go/internal/config"
 	"github.com/bighaidao/clover-go/internal/domain"
 	"github.com/bighaidao/clover-go/internal/fs"
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -190,7 +189,7 @@ func renderSinglePane(c *ui.Context, coord *app.Coordinator, tab *app.TabState, 
 						ui.Text(c, "在访达中打开").FontSize(11).TextColor(ui.Hex("#FFFFFF"))
 					})
 					if btnReveal.Clicked() {
-						mygo.Shell.ShowItemInFolder(pane.Path)
+						revealDirectoryOrSelf(coord, pane.Path)
 					}
 
 					btnRetry := ui.ButtonBase(c).Padding(5, 12).Radius(6).AlignItems(ui.Center)

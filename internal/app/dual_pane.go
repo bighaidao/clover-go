@@ -56,6 +56,7 @@ func (c *Coordinator) LoadPane(pane *PaneState, onDone func()) {
 	pane.IsLoading = true
 	path := pane.Path
 	showHidden := c.Prefs.Get().ShowHidden
+	keepPlace := onDone == nil
 
 	go func() {
 		entries, _, err := fs.ReadDirPage(fs.ReadDirOptions{
@@ -88,8 +89,10 @@ func (c *Coordinator) LoadPane(pane *PaneState, onDone func()) {
 
 			domain.SortFiles(entries, pane.Sort)
 			pane.Entries = entries
-			pane.TableState.HoldPlace()
-			c.ApplyPaneFilter(pane)
+			if keepPlace {
+				pane.TableState.HoldPlace()
+			}
+			c.applyPaneFilterInternal(pane, keepPlace)
 
 			if onDone != nil {
 				onDone()
@@ -101,10 +104,16 @@ func (c *Coordinator) LoadPane(pane *PaneState, onDone func()) {
 
 // ApplyPaneFilter calculates DisplayEntries for a given pane based on its FilterQuery and the global FilterTag.
 func (c *Coordinator) ApplyPaneFilter(pane *PaneState) {
+	c.applyPaneFilterInternal(pane, true)
+}
+
+func (c *Coordinator) applyPaneFilterInternal(pane *PaneState, holdPlace bool) {
 	if pane == nil {
 		return
 	}
-	pane.TableState.HoldPlace()
+	if holdPlace {
+		pane.TableState.HoldPlace()
+	}
 	query := strings.TrimSpace(pane.FilterQuery)
 	filtered := pane.Entries
 

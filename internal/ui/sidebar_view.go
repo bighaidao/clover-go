@@ -9,7 +9,6 @@ import (
 	"github.com/bighaidao/clover-go/internal/config"
 	"github.com/bighaidao/clover-go/internal/domain"
 	"github.com/bighaidao/clover-go/internal/macos"
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -156,7 +155,7 @@ func renderBookmarkItem(c *ui.Context, coord *app.Coordinator, it config.Bookmar
 			coord.LoadCurrentTab(nil)
 		}
 		if m.Item("在访达中显示").Chosen() {
-			mygo.Shell.ShowItemInFolder(it.Path)
+			revealInFinderOrSelf(coord, it.Path)
 		}
 		if m.Item("复制路径").Chosen() {
 			_ = macos.CopyPath(it.Path, "posix")

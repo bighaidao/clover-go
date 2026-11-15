@@ -18,28 +18,33 @@ const (
 
 // Preferences stores user preferences.
 type Preferences struct {
-	Appearance         string   `json:"appearance"` // "system", "light", "dark"
-	AccentColor        string   `json:"accent_color"`
-	Vibrancy           bool     `json:"vibrancy"`
-	DefaultView        ViewMode `json:"default_view"`
-	ShowHidden         bool     `json:"show_hidden"`
-	ShowBookmark       bool     `json:"show_bookmark"`
-	ShowPreview        bool     `json:"show_preview"`
-	GridIconSize       int      `json:"grid_icon_size"`
-	SidebarWidth       float32  `json:"sidebar_width"`   // default: 155
-	DualPaneRatio      float32  `json:"dual_pane_ratio"` // default: 50 (%)
-	PreviewWidth       float32  `json:"preview_width"`   // default: 250
-	DragAction         string   `json:"drag_action"`     // "move" or "copy"
-	ConflictAction     string   `json:"conflict_action"` // "ask", "rename", "overwrite"
-	DoubleClickNav     bool     `json:"double_click_nav"`
-	RestoreSession     bool     `json:"restore_session"`
-	SortField          string   `json:"sort_field"`            // "create_time", "mod_time", "name", "size", "kind"
-	SortDirection      string   `json:"sort_direction"`        // "asc" or "desc"
-	ColWidthName       float32  `json:"col_width_name"`        // default: 220
-	ColWidthCreateTime float32  `json:"col_width_create_time"` // default: 115
-	ColWidthModTime    float32  `json:"col_width_mod_time"`    // default: 115
-	ColWidthSize       float32  `json:"col_width_size"`        // default: 70
-	ColWidthKind       float32  `json:"col_width_kind"`        // default: 90
+	Appearance     string   `json:"appearance"` // "system", "light", "dark"
+	AccentColor    string   `json:"accent_color"`
+	Vibrancy       bool     `json:"vibrancy"`
+	DefaultView    ViewMode `json:"default_view"`
+	ShowHidden     bool     `json:"show_hidden"`
+	ShowBookmark   bool     `json:"show_bookmark"`
+	ShowPreview    bool     `json:"show_preview"`
+	GridIconSize   int      `json:"grid_icon_size"`
+	SidebarWidth   float32  `json:"sidebar_width"`   // default: 155
+	DualPaneRatio  float32  `json:"dual_pane_ratio"` // default: 50 (%)
+	PreviewWidth   float32  `json:"preview_width"`   // default: 250
+	DragAction     string   `json:"drag_action"`     // "move" or "copy"
+	ConflictAction string   `json:"conflict_action"` // "ask", "rename", "overwrite"
+	DoubleClickNav bool     `json:"double_click_nav"`
+	RestoreSession bool     `json:"restore_session"`
+	// TakeoverFinder makes CloverGo the system-wide handler for "Open Folder"
+	// and "Show in Finder" requests on macOS. Defaults to off so that merely
+	// installing CloverGo never changes the user's system defaults.
+	TakeoverFinder     bool    `json:"takeover_finder"`
+	LaunchAtLogin      bool    `json:"launch_at_login"`
+	SortField          string  `json:"sort_field"`            // "create_time", "mod_time", "name", "size", "kind"
+	SortDirection      string  `json:"sort_direction"`        // "asc" or "desc"
+	ColWidthName       float32 `json:"col_width_name"`        // default: 220
+	ColWidthCreateTime float32 `json:"col_width_create_time"` // default: 115
+	ColWidthModTime    float32 `json:"col_width_mod_time"`    // default: 115
+	ColWidthSize       float32 `json:"col_width_size"`        // default: 70
+	ColWidthKind       float32 `json:"col_width_kind"`        // default: 90
 	// Metadata column visibility: the zero value (false) shows every column,
 	// so existing prefs.json files keep their full layout.
 	HideColCreateTime bool `json:"hide_col_create_time,omitempty"`
@@ -66,6 +71,7 @@ func DefaultPreferences() Preferences {
 		ConflictAction:     "ask",
 		DoubleClickNav:     true,
 		RestoreSession:     true,
+		TakeoverFinder:     false,
 		SortField:          "create_time",
 		SortDirection:      "desc",
 		ColWidthName:       220,
